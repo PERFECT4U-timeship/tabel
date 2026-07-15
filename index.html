@@ -665,7 +665,6 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, addDoc, onSnapshot, collectionGroup, query, where
@@ -680,7 +679,6 @@ const firebaseConfig={
   appId:"1:408428975185:web:be8cfaaf4b3564f8a0d470"
 };
 const fbApp=initializeApp(firebaseConfig);
-const auth=getAuth(fbApp);
 const db=getFirestore(fbApp);
 
 const MONTHS=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -1626,13 +1624,18 @@ async function ensureConfig(){
   }
 }
 async function boot(){
-  try{await signInAnonymously(auth);}
-  catch(e){console.error(e);document.getElementById('loginError').textContent='Не удалось подключиться к базе. Проверьте интернет.';document.getElementById('loginError').style.display='block';return;}
-  await ensureConfig();
-  const cfgSnap=await getDoc(doc(db,'config','app'));
-  cfg=cfgSnap.data();
-  cfg.employees=cfg.employees||[];
-  cfg.projects=(cfg.projects||[]).map((p,i)=>({...p,color:p.color||PALETTE[i%PALETTE.length],subs:p.subs||[]}));
+  try{
+    await ensureConfig();
+    const cfgSnap=await getDoc(doc(db,'config','app'));
+    cfg=cfgSnap.data();
+    cfg.employees=cfg.employees||[];
+    cfg.projects=(cfg.projects||[]).map((p,i)=>({...p,color:p.color||PALETTE[i%PALETTE.length],subs:p.subs||[]}));
+  }catch(e){
+    console.error(e);
+    document.getElementById('loginError').textContent='Не удалось подключиться к базе. Проверьте интернет.';
+    document.getElementById('loginError').style.display='block';
+    return;
+  }
   watchConfig();
   populateLoginEmployees();
   document.getElementById('loginBtn').addEventListener('click',tryLogin);
