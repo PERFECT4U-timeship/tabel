@@ -348,6 +348,9 @@
   .ordbtn{font-size:11px;padding:4px 6px;line-height:1}
   td.ord{white-space:nowrap;width:1%;padding-right:0}
   .lunch-row td{background:color-mix(in srgb,var(--amber) 9%,transparent)}
+  .modal.wide{max-width:760px}
+  .emplink{color:var(--accent-d);cursor:pointer;font-weight:650;border-bottom:1px dashed var(--line)}
+  .emplink:hover{border-bottom-color:var(--accent)}
   tr[draggable="true"]{cursor:grab}
   tr.dragging{opacity:.4}
   tr.dragover td{box-shadow:inset 0 2px 0 0 var(--accent)}
@@ -552,8 +555,13 @@
     </div>
     <div class="card">
       <h2>Свод по сотрудникам</h2>
-      <p class="hint">Итоги за выбранный период по каждому сотруднику компании — данные тянутся из общей базы онлайн.</p>
+      <p class="hint">Итоги за выбранный период по каждому сотруднику компании. Нажмите на имя сотрудника, чтобы открыть его подробную сводку.</p>
       <div id="allEmpTable"><div class="empty">Загрузка…</div></div>
+    </div>
+    <div class="card">
+      <h2>Время по проектам и подпроектам</h2>
+      <p class="hint">По каждому сотруднику — сколько времени ушло на каждый проект и отдельно на каждый подпроект за выбранный период.</p>
+      <div id="allProjBreakdown"><div class="empty">Загрузка…</div></div>
     </div>
     <div class="card">
       <h2>Выгрузка сводного отчёта</h2>
@@ -616,6 +624,17 @@
     <div class="field"><label>Пароль</label><input type="password" id="loginPassword" placeholder="Пароль"></div>
     <div class="login-hint" id="loginError" style="display:none;color:var(--red)"></div>
     <div class="actions"><button class="btn" id="loginBtn" style="width:100%">Войти</button></div>
+  </div>
+</div>
+
+<!-- employee detail (drill-down) modal -->
+<div class="overlay" id="empDetailOverlay">
+  <div class="modal wide">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <h3 id="empDetailTitle" style="margin:0">Сводка сотрудника</h3>
+      <button class="btn gray sm" id="empDetailClose">Закрыть</button>
+    </div>
+    <div id="empDetailBody" style="margin-top:16px;max-height:72vh;overflow:auto"></div>
   </div>
 </div>
 
@@ -1293,6 +1312,7 @@ function renderEmpAdmin(){
 
 /* ===== ALL EMPLOYEES REPORT (manager/admin only) ===== */
 let allPeriod='week',allPerRef=ymd(new Date());
+let allReportEntries=[],allReportStatuses=[];
 async function fetchAllEntries(start,end){
   const q=query(collectionGroup(db,'entries'),where('date','>=',start),where('date','<=',end));
   const snap=await getDocs(q);return snap.docs.map(d=>d.data());
@@ -1312,27 +1332,113 @@ function summarizeByEmployee(entries,statuses){
   });
   return byEmp;
 }
+/* по каждому сотруднику: {проект:{total, subs:{подпроект|'—':минуты}}} — обед исключён */
+function projectBreakdownByEmployee(entries){
+  const res={};
+  entries.forEach(e=>{
+    if(e.lunch)return;
+    const emp=e.employee||'—',proj=e.project||'—',sub=e.sub||'—',min=e.minutes||0;
+    const byP=res[emp]=res[emp]||{};
+    const p=byP[proj]=byP[proj]||{total:0,subs:{}};
+    p.total+=min;
+    p.subs[sub]=(p.subs[sub]||0)+min;
+  });
+  return res;
+}
+function renderAllProjBreakdown(entries){
+  const box=document.getElementById('allProjBreakdown');
+  const data=projectBreakdownByEmployee(entries);
+  const emps=Object.keys(data).sort((a,b)=>a.localeCompare(b,'ru'));
+  if(!emps.length){box.innerHTML='<div class="empty">Нет данных за этот период</div>';return;}
+  let html='';
+  emps.forEach(name=>{
+    const projs=data[name];
+    const projList=Object.entries(projs).sort((a,b)=>b[1].total-a[1].total);
+    const empTotal=projList.reduce((s,[,p])=>s+p.total,0);
+    html+=`<div class="plan-day-hd"><span class="emplink" data-emp="${esc(name)}">${esc(name)}</span> <span class="cnt">· всего ${fmtHM(empTotal)}</span></div>`;
+    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th></tr></thead><tbody>';
+    projList.forEach(([proj,p])=>{
+      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td></tr>`;
+      const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
+      const onlyDash=subList.length===1&&subList[0][0]==='—';
+      if(!onlyDash)subList.forEach(([sub,min])=>{
+        html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td></tr>`;
+      });
+    });
+    html+='</tbody></table>';
+  });
+  box.innerHTML=html;
+  box.querySelectorAll('.emplink[data-emp]').forEach(el=>el.addEventListener('click',()=>openEmployeeDetail(el.dataset.emp)));
+}
+window.openEmployeeDetail=function(name){
+  const ents=allReportEntries.filter(e=>e.employee===name);
+  const sts=allReportStatuses.filter(s=>s.employee===name);
+  const worked=ents.filter(e=>!e.lunch).reduce((a,e)=>a+(e.minutes||0),0);
+  const lunch=ents.filter(e=>e.lunch).reduce((a,e)=>a+(e.minutes||0),0);
+  let vac=0,off=0,sick=0;sts.forEach(s=>{if(s.status==='vacation')vac++;else if(s.status==='dayoff')off++;else if(s.status==='sick')sick++;});
+  const workDays=new Set(ents.filter(e=>!e.lunch).map(e=>e.date)).size;
+  let html=`<div class="stat-grid">
+    <div class="stat"><div class="v">${fmtHM(worked)}</div><div class="l">Отработано</div></div>
+    <div class="stat"><div class="v">${workDays}</div><div class="l">Рабочих дней</div></div>
+    <div class="stat"><div class="v">${fmtHM(lunch)}</div><div class="l">Обеды (не в счёт)</div></div>
+    <div class="stat green"><div class="v">${vac}</div><div class="l">Отпуск</div></div>
+    <div class="stat amber"><div class="v">${off}</div><div class="l">Отгулы</div></div>
+    <div class="stat red"><div class="v">${sick}</div><div class="l">Больничные</div></div>
+  </div>`;
+  const data=projectBreakdownByEmployee(ents)[name];
+  html+='<h2 style="margin:20px 0 8px;font-size:15px">По проектам и подпроектам</h2>';
+  if(data){
+    const projList=Object.entries(data).sort((a,b)=>b[1].total-a[1].total);
+    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th></tr></thead><tbody>';
+    projList.forEach(([proj,p])=>{
+      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td></tr>`;
+      const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
+      const onlyDash=subList.length===1&&subList[0][0]==='—';
+      if(!onlyDash)subList.forEach(([sub,min])=>html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td></tr>`);
+    });
+    html+='</tbody></table>';
+  }else html+='<div class="empty">Нет записей за период</div>';
+  const byDay={};ents.forEach(e=>{if(!e.lunch)byDay[e.date]=(byDay[e.date]||0)+(e.minutes||0);});
+  const dayStatus={};sts.forEach(s=>dayStatus[s.date]=s.status);
+  const days=[...new Set([...Object.keys(byDay),...Object.keys(dayStatus)])].sort();
+  html+='<h2 style="margin:20px 0 8px;font-size:15px">По дням</h2>';
+  if(days.length){
+    html+='<table><thead><tr><th>Дата</th><th>День</th><th>Статус</th><th>Часы</th></tr></thead><tbody>';
+    days.forEach(d=>{const dd=parseYmd(d),s=dayStatus[d]||'work',mins=byDay[d]||0;
+      html+=`<tr><td>${dd.getDate()} ${MONTHS[dd.getMonth()]}</td><td class="muted">${WD[dd.getDay()]}</td><td>${s==='work'?'<span class="muted">Рабочий</span>':STATUS_LABELS[s]}</td><td class="time">${s==='work'?(mins?fmtHM(mins):'<span class="muted">—</span>'):'—'}</td></tr>`;});
+    html+='</tbody></table>';
+  }else html+='<div class="empty">Нет данных</div>';
+  document.getElementById('empDetailTitle').textContent='Сводка: '+name+' — '+computeLabel(allPeriod,allPerRef);
+  document.getElementById('empDetailBody').innerHTML=html;
+  document.getElementById('empDetailOverlay').classList.add('show');
+};
+function closeEmpDetail(){document.getElementById('empDetailOverlay').classList.remove('show');}
 async function renderAllReport(){
   document.getElementById('allPeriodLabel').textContent=computeLabel(allPeriod,allPerRef);
   const{start,end}=computeRange(allPeriod,allPerRef);
   const area=document.getElementById('allEmpTable');
-  area.innerHTML='<div class="empty">Загрузка…</div>';
+  const brk=document.getElementById('allProjBreakdown');
+  area.innerHTML='<div class="empty">Загрузка…</div>';brk.innerHTML='<div class="empty">Загрузка…</div>';
   let entries,statuses;
   try{[entries,statuses]=await Promise.all([fetchAllEntries(start,end),fetchAllDayStatus(start,end)]);}
   catch(e){
     console.error(e);
-    area.innerHTML='<div class="empty">Не удалось загрузить сводные данные.<br>'+esc(e&&e.message||'')+'<br>Если в консоли браузера есть ссылка на создание индекса Firestore — откройте её и подождите минуту.</div>';
+    const msg='<div class="empty">Не удалось загрузить сводные данные.<br>'+esc(e&&e.message||'')+'<br>Если в консоли браузера есть ссылка на создание индекса Firestore — откройте её и подождите минуту.</div>';
+    area.innerHTML=msg;brk.innerHTML='';
     return;
   }
+  allReportEntries=entries;allReportStatuses=statuses;
+  renderAllProjBreakdown(entries);
   const byEmp=summarizeByEmployee(entries,statuses);
   const rows=Object.keys(byEmp).sort((a,b)=>a.localeCompare(b,'ru'));
   if(!rows.length){area.innerHTML='<div class="empty">Нет данных за этот период</div>';return;}
   let html='<table><thead><tr><th>Сотрудник</th><th>Отработано</th><th>Обед</th><th>Отпуск</th><th>Отгул</th><th>Больничный</th></tr></thead><tbody>';
   rows.forEach(name=>{const b=byEmp[name];
-    html+=`<tr><td>${esc(name)}</td><td class="time">${fmtHM(b.minutes)}</td><td class="muted">${b.lunch?fmtHM(b.lunch):'—'}</td><td>${b.vac||'—'}</td><td>${b.off||'—'}</td><td>${b.sick||'—'}</td></tr>`;});
+    html+=`<tr><td><span class="emplink" data-emp="${esc(name)}">${esc(name)}</span></td><td class="time">${fmtHM(b.minutes)}</td><td class="muted">${b.lunch?fmtHM(b.lunch):'—'}</td><td>${b.vac||'—'}</td><td>${b.off||'—'}</td><td>${b.sick||'—'}</td></tr>`;});
   const totalMin=rows.reduce((a,n)=>a+byEmp[n].minutes,0);
   html+=`</tbody></table><div class="daytotal"><span class="muted">Итого по компании</span><span class="big">${fmtHM(totalMin)}</span></div>`;
   area.innerHTML=html;
+  area.querySelectorAll('.emplink[data-emp]').forEach(el=>el.addEventListener('click',()=>openEmployeeDetail(el.dataset.emp)));
 }
 function shiftAllPeriod(dir){
   if(allPeriod==='day')allPerRef=addDays(allPerRef,dir);
@@ -1356,6 +1462,20 @@ async function exportAllExcel(){
     s1.push([name,fmtHM(b.minutes),+(b.minutes/60).toFixed(2),b.lunch?fmtHM(b.lunch):'',b.vac,b.off,b.sick]);});
   const ws1=XLSX.utils.aoa_to_sheet(s1);ws1['!cols']=[{wch:24},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:14}];
   XLSX.utils.book_append_sheet(wb,ws1,'Свод');
+  // лист: время по проектам и подпроектам на каждого сотрудника
+  const brk=projectBreakdownByEmployee(entries);
+  const sB=[['Сотрудник','Проект','Подпроект','Часы (ч:мм)','Часы (десят.)']];
+  Object.keys(brk).sort((a,b)=>a.localeCompare(b,'ru')).forEach(name=>{
+    const projList=Object.entries(brk[name]).sort((a,b)=>b[1].total-a[1].total);
+    projList.forEach(([proj,p])=>{
+      const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
+      const onlyDash=subList.length===1&&subList[0][0]==='—';
+      if(onlyDash){sB.push([name,proj,'',fmtHM(p.total),+(p.total/60).toFixed(2)]);}
+      else subList.forEach(([sub,min])=>sB.push([name,proj,sub==='—'?'(без подпроекта)':sub,fmtHM(min),+(min/60).toFixed(2)]));
+    });
+  });
+  const wsB=XLSX.utils.aoa_to_sheet(sB);wsB['!cols']=[{wch:24},{wch:22},{wch:20},{wch:14},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsB,'Проекты по сотрудникам');
   const byEmpEntries={};
   entries.forEach(e=>{(byEmpEntries[e.employee]=byEmpEntries[e.employee]||[]).push(e);});
   Object.keys(byEmpEntries).sort((a,b)=>a.localeCompare(b,'ru')).forEach(name=>{
@@ -1506,6 +1626,8 @@ function bind(){
   document.getElementById('planEditSave').addEventListener('click',savePlanEdit);
   document.getElementById('planEditOverlay').addEventListener('click',e=>{if(e.target.id==='planEditOverlay')closePlanEdit();});
   document.getElementById('saveMyPass').addEventListener('click',saveMyPassword);
+  document.getElementById('empDetailClose').addEventListener('click',closeEmpDetail);
+  document.getElementById('empDetailOverlay').addEventListener('click',e=>{if(e.target.id==='empDetailOverlay')closeEmpDetail();});
   document.getElementById('pfProject').addEventListener('change',e=>fillPlanSub(e.target.value,''));
   document.getElementById('addPlan').addEventListener('click',addPlanFromForm);
   document.getElementById('pfTask').addEventListener('keydown',e=>{if(e.key==='Enter')addPlanFromForm();});
