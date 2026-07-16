@@ -1356,13 +1356,15 @@ function renderAllProjBreakdown(entries){
     const projList=Object.entries(projs).sort((a,b)=>b[1].total-a[1].total);
     const empTotal=projList.reduce((s,[,p])=>s+p.total,0);
     html+=`<div class="plan-day-hd"><span class="emplink" data-emp="${esc(name)}">${esc(name)}</span> <span class="cnt">· всего ${fmtHM(empTotal)}</span></div>`;
-    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th></tr></thead><tbody>';
+    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th><th>Доля</th></tr></thead><tbody>';
     projList.forEach(([proj,p])=>{
-      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td></tr>`;
+      const pct=empTotal>0?Math.round(p.total/empTotal*100):0;
+      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td><td class="muted">${pct}%</td></tr>`;
       const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
       const onlyDash=subList.length===1&&subList[0][0]==='—';
       if(!onlyDash)subList.forEach(([sub,min])=>{
-        html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td></tr>`;
+        const spct=empTotal>0?Math.round(min/empTotal*100):0;
+        html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td><td class="muted">${spct}%</td></tr>`;
       });
     });
     html+='</tbody></table>';
@@ -1389,12 +1391,13 @@ window.openEmployeeDetail=function(name){
   html+='<h2 style="margin:20px 0 8px;font-size:15px">По проектам и подпроектам</h2>';
   if(data){
     const projList=Object.entries(data).sort((a,b)=>b[1].total-a[1].total);
-    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th></tr></thead><tbody>';
+    html+='<table><thead><tr><th>Проект</th><th>Подпроект</th><th>Время</th><th>Доля</th></tr></thead><tbody>';
     projList.forEach(([proj,p])=>{
-      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td></tr>`;
+      const pct=worked>0?Math.round(p.total/worked*100):0;
+      html+=`<tr><td><span class="tag" style="--c:${projColor(proj)}"><span class="pj"></span>${esc(proj)}</span></td><td></td><td class="time">${fmtHM(p.total)}</td><td class="muted">${pct}%</td></tr>`;
       const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
       const onlyDash=subList.length===1&&subList[0][0]==='—';
-      if(!onlyDash)subList.forEach(([sub,min])=>html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td></tr>`);
+      if(!onlyDash)subList.forEach(([sub,min])=>{const spct=worked>0?Math.round(min/worked*100):0;html+=`<tr><td></td><td class="muted">${sub==='—'?'(без подпроекта)':esc(sub)}</td><td class="time muted">${fmtHM(min)}</td><td class="muted">${spct}%</td></tr>`;});
     });
     html+='</tbody></table>';
   }else html+='<div class="empty">Нет записей за период</div>';
@@ -1408,6 +1411,22 @@ window.openEmployeeDetail=function(name){
       html+=`<tr><td>${dd.getDate()} ${MONTHS[dd.getMonth()]}</td><td class="muted">${WD[dd.getDay()]}</td><td>${s==='work'?'<span class="muted">Рабочий</span>':STATUS_LABELS[s]}</td><td class="time">${s==='work'?(mins?fmtHM(mins):'<span class="muted">—</span>'):'—'}</td></tr>`;});
     html+='</tbody></table>';
   }else html+='<div class="empty">Нет данных</div>';
+  const byDayEntries={};ents.forEach(e=>{(byDayEntries[e.date]=byDayEntries[e.date]||[]).push(e);});
+  const taskDays=Object.keys(byDayEntries).sort();
+  html+='<h2 style="margin:20px 0 8px;font-size:15px">Задачи по дням</h2>';
+  if(taskDays.length){
+    taskDays.forEach(d=>{
+      const dd=parseYmd(d),list=byDayEntries[d].slice().sort((a,b)=>(a.order??0)-(b.order??0));
+      const dt=list.filter(e=>!e.lunch).reduce((a,e)=>a+(e.minutes||0),0);
+      html+=`<div class="plan-day-hd">${dd.getDate()} ${MONTHS[dd.getMonth()]}, ${WD[dd.getDay()].toLowerCase()} <span class="cnt">· ${fmtHM(dt)}</span></div>`;
+      html+='<table><tbody>';
+      list.forEach(e=>{
+        const tag=e.lunch?`<span class="tag" style="--c:#f59e0b"><span class="pj"></span>🍽 Обед</span>`:`<span class="tag" style="--c:${projColor(e.project)}"><span class="pj"></span>${esc(e.project)}</span>${e.sub?`<span class="tag sub">${esc(e.sub)}</span>`:''}`;
+        html+=`<tr><td>${tag}</td><td>${e.lunch?'<span class="muted">Перерыв</span>':(esc(e.task)||'<span class="muted">—</span>')}</td><td class="time${e.lunch?' muted':''}">${fmtHMS(secOf(e))}</td></tr>`;
+      });
+      html+='</tbody></table>';
+    });
+  }else html+='<div class="empty">Нет задач за период</div>';
   document.getElementById('empDetailTitle').textContent='Сводка: '+name+' — '+computeLabel(allPeriod,allPerRef);
   document.getElementById('empDetailBody').innerHTML=html;
   document.getElementById('empDetailOverlay').classList.add('show');
@@ -1464,17 +1483,18 @@ async function exportAllExcel(){
   XLSX.utils.book_append_sheet(wb,ws1,'Свод');
   // лист: время по проектам и подпроектам на каждого сотрудника
   const brk=projectBreakdownByEmployee(entries);
-  const sB=[['Сотрудник','Проект','Подпроект','Часы (ч:мм)','Часы (десят.)']];
+  const sB=[['Сотрудник','Проект','Подпроект','Часы (ч:мм)','Часы (десят.)','Доля %']];
   Object.keys(brk).sort((a,b)=>a.localeCompare(b,'ru')).forEach(name=>{
     const projList=Object.entries(brk[name]).sort((a,b)=>b[1].total-a[1].total);
+    const empTot=projList.reduce((s,[,p])=>s+p.total,0)||1;
     projList.forEach(([proj,p])=>{
       const subList=Object.entries(p.subs).sort((a,b)=>b[1]-a[1]);
       const onlyDash=subList.length===1&&subList[0][0]==='—';
-      if(onlyDash){sB.push([name,proj,'',fmtHM(p.total),+(p.total/60).toFixed(2)]);}
-      else subList.forEach(([sub,min])=>sB.push([name,proj,sub==='—'?'(без подпроекта)':sub,fmtHM(min),+(min/60).toFixed(2)]));
+      if(onlyDash){sB.push([name,proj,'',fmtHM(p.total),+(p.total/60).toFixed(2),+(p.total/empTot*100).toFixed(1)]);}
+      else subList.forEach(([sub,min])=>sB.push([name,proj,sub==='—'?'(без подпроекта)':sub,fmtHM(min),+(min/60).toFixed(2),+(min/empTot*100).toFixed(1)]));
     });
   });
-  const wsB=XLSX.utils.aoa_to_sheet(sB);wsB['!cols']=[{wch:24},{wch:22},{wch:20},{wch:14},{wch:14}];
+  const wsB=XLSX.utils.aoa_to_sheet(sB);wsB['!cols']=[{wch:24},{wch:22},{wch:20},{wch:14},{wch:14},{wch:10}];
   XLSX.utils.book_append_sheet(wb,wsB,'Проекты по сотрудникам');
   const byEmpEntries={};
   entries.forEach(e=>{(byEmpEntries[e.employee]=byEmpEntries[e.employee]||[]).push(e);});
