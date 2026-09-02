@@ -231,6 +231,19 @@
   .timer-box.running{box-shadow:0 0 0 2px var(--accent-soft);animation:pulse 2.2s infinite}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 2px var(--accent-soft)}50%{box-shadow:0 0 0 6px var(--accent-soft)}}
 
+  /* список задач в работе */
+  .tlist{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+  .tlist-hd{color:var(--muted);font-size:13px;margin-bottom:2px}
+  .titem{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:var(--card-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .titem.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--card-2))}
+  .titem .ttime{font-variant-numeric:tabular-nums;font-weight:800;font-size:17px;min-width:82px}
+  .titem.on .ttime{color:var(--accent)}
+  .titem .tname{flex:1;min-width:150px;font-size:14px;line-height:1.35}
+  .titem .tname small{display:block;color:var(--muted);font-size:12px}
+  .titem .tbtns{display:flex;gap:6px;flex-wrap:wrap}
+  .titem .tstate{font-size:12px;color:var(--muted);white-space:nowrap}
+
   table{width:100%;border-collapse:collapse;font-size:14px}
   th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line)}
   th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600}
@@ -446,13 +459,15 @@
 
     <div class="card" id="entryCard">
       <h2>Добавить запись</h2>
-      <p class="hint">Выберите проект и задачу. Можно засечь время таймером или ввести вручную.</p>
+      <p class="hint">Выберите проект и задачу. Можно засечь время таймером или ввести вручную. Задач в работе может быть несколько — идёт всегда одна, остальные ждут на паузе.</p>
       <div class="timer-box" id="timerBox">
         <div class="timer-display" id="timerDisplay">00:00:00</div>
         <div class="timer-meta" id="timerMeta">Таймер остановлен</div>
         <button class="btn ghost" id="timerPause" style="display:none">⏸ Пауза</button>
+        <button class="btn ghost" id="timerStop" style="display:none">⏹ Стоп и записать</button>
         <button class="btn" id="timerToggle">▶ Старт</button>
       </div>
+      <div class="tlist" id="timerList"></div>
       <div class="row" style="margin-top:18px">
         <div class="field"><label>Проект</label><select id="fProject"></select></div>
         <div class="field" id="subWrap"><label>Подпроект</label><select id="fSub"></select></div>
@@ -714,7 +729,7 @@ const DEFAULT_PROJECTS=[
   {name:'АДМИНИСТРАТИВНЫЕ ВОПРОСЫ',subs:[],color:'#f59e0b'}
 ];
 
-let state={theme:localStorage.getItem('tabel_theme')||'dark',entries:[],plans:[],dayStatus:{},timer:null};
+let state={theme:localStorage.getItem('tabel_theme')||'dark',entries:[],plans:[],dayStatus:{},timers:[]};
 let cfg={employees:[],projects:[],normHours:8,password:''};
 let session=null;
 function saveTheme(){localStorage.setItem('tabel_theme',state.theme);}
@@ -722,8 +737,19 @@ const SESSION_KEY='tabel_session';
 function loadSession(){try{return JSON.parse(localStorage.getItem(SESSION_KEY));}catch(e){return null;}}
 function saveSession(s){localStorage.setItem(SESSION_KEY,JSON.stringify(s));}
 function clearSession(){localStorage.removeItem(SESSION_KEY);}
-function loadTimer(){try{return JSON.parse(localStorage.getItem('tabel_timer_'+session.employee));}catch(e){return null;}}
-function saveTimer(){localStorage.setItem('tabel_timer_'+session.employee,JSON.stringify(state.timer));}
+/* таймеры: список задач в работе. Старый формат (один объект в tabel_timer_*) переносится автоматически */
+function loadTimers(){
+  try{
+    const arr=JSON.parse(localStorage.getItem('tabel_timers_'+session.employee));
+    if(Array.isArray(arr))return arr.filter(t=>t&&t.project!=null).map(t=>({...t,id:t.id||newTimerId()}));
+  }catch(e){}
+  try{
+    const old=JSON.parse(localStorage.getItem('tabel_timer_'+session.employee));
+    if(old&&old.project!=null)return [{...old,id:old.id||newTimerId()}];
+  }catch(e){}
+  return [];
+}
+function saveTimers(){localStorage.setItem('tabel_timers_'+session.employee,JSON.stringify(state.timers));localStorage.removeItem('tabel_timer_'+session.employee);}
 
 /* date helpers */
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -1028,8 +1054,17 @@ window.planToWork=function(id){
   projectOptions(document.getElementById('fProject'),p.project);refreshSubSelect();
   if(p.sub&&!document.getElementById('subWrap').classList.contains('hidden'))document.getElementById('fSub').value=p.sub;
   document.getElementById('fTask').value=p.task||'';
-  if(!state.timer){state.timer={createdTs:Date.now(),startTs:Date.now(),accMs:0,project:p.project,sub:p.sub,task:p.task};saveTimer();renderTimerState();toast('Таймер запущен ▶');}
-  else toast('Подставлено в форму (таймер уже идёт)');
+  const same=state.timers.find(t=>t.project===p.project&&(t.sub||'')===(p.sub||'')&&(t.task||'')===(p.task||''));
+  if(same){
+    if(same.startTs)toast('Эта задача уже идёт');
+    else{resumeTimer(same.id);toast('Вернулись к этой задаче ▶');}
+  }
+  else{
+    pauseAllTimers();
+    state.timers.push({id:newTimerId(),createdTs:Date.now(),startTs:Date.now(),accMs:0,project:p.project,sub:p.sub,task:p.task});
+    saveTimers();renderTimerState();
+    toast(state.timers.length>1?'Таймер запущен ▶ (прошлая задача на паузе)':'Таймер запущен ▶');
+  }
   document.getElementById('entryCard').scrollIntoView({behavior:'smooth',block:'center'});
 };
 function addPlanFromForm(){
@@ -1099,56 +1134,116 @@ function copyPrevDay(){
   toast('Скопировано из '+fmtDateLong(found));
 }
 
-/* timer (с паузой) — модель: {createdTs, startTs|null, accMs, project, sub, task} */
+/* ===== ТАЙМЕРЫ (несколько задач одновременно) =====
+   модель: state.timers = [{id, createdTs, startTs|null, accMs, project, sub, task}]
+   идёт максимум одна задача (startTs != null), остальные ждут на паузе */
 let timerInt=null;
-function timerElapsedMs(){
-  const t=state.timer; if(!t)return 0;
-  return (t.accMs||0)+(t.startTs?(Date.now()-t.startTs):0);
-}
+function newTimerId(){return 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
+function tElapsedMs(t){if(!t)return 0;return (t.accMs||0)+(t.startTs?(Date.now()-t.startTs):0);}
+function activeTimer(){return state.timers.find(t=>t.startTs)||null;}
+function findTimer(id){return state.timers.find(t=>t.id===id)||null;}
+function pauseAllTimers(){state.timers.forEach(t=>{if(t.startTs){t.accMs=(t.accMs||0)+(Date.now()-t.startTs);t.startTs=null;t.pausedTs=Date.now();}});}
+/* последняя задача, которая шла (чтобы «Продолжить» в шапке вернул именно её) */
+function lastPausedTimer(){return state.timers.slice().sort((a,b)=>(b.pausedTs||0)-(a.pausedTs||0))[0]||null;}
+function timerLabel(t){return `<b>${esc(t.project)}</b>${t.sub?' · '+esc(t.sub):''}${t.task?' — '+esc(t.task):''}`;}
+function pad2(n){return String(n).padStart(2,'0');}
+function fmtClock(sec){sec=Math.max(0,sec);return pad2(Math.floor(sec/3600))+':'+pad2(Math.floor(sec%3600/60))+':'+pad2(sec%60);}
+
 function timerTick(){
-  if(!state.timer)return;
-  const sec=Math.floor(timerElapsedMs()/1000);
-  const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
-  document.getElementById('timerDisplay').textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  const a=activeTimer();
+  document.getElementById('timerDisplay').textContent=fmtClock(Math.floor(tElapsedMs(a)/1000));
+  state.timers.forEach(t=>{
+    const el=document.querySelector('.titem[data-tid="'+t.id+'"] .ttime');
+    if(el)el.textContent=fmtClock(Math.floor(tElapsedMs(t)/1000));
+  });
 }
 function renderTimerState(){
-  const btn=document.getElementById('timerToggle'),meta=document.getElementById('timerMeta'),box=document.getElementById('timerBox'),pauseBtn=document.getElementById('timerPause');
-  if(state.timer){
-    const t=state.timer,running=!!t.startTs;
-    btn.textContent='⏹ Стоп и записать';
-    pauseBtn.style.display='';pauseBtn.textContent=running?'⏸ Пауза':'▶ Продолжить';
-    box.classList.toggle('running',running);
-    meta.innerHTML=`${running?'Идёт отсчёт':'На паузе'}: <b>${esc(t.project)}</b>${t.sub?' · '+esc(t.sub):''}${t.task?' — '+esc(t.task):''}`;
-    if(running){if(!timerInt)timerInt=setInterval(timerTick,1000);}else if(timerInt){clearInterval(timerInt);timerInt=null;}
-    timerTick();
+  const btn=document.getElementById('timerToggle'),meta=document.getElementById('timerMeta'),box=document.getElementById('timerBox'),
+        pauseBtn=document.getElementById('timerPause'),stopBtn=document.getElementById('timerStop'),list=document.getElementById('timerList');
+  const a=activeTimer();
+  btn.textContent=state.timers.length?'▶ Старт новой задачи':'▶ Старт';
+  box.classList.toggle('running',!!a);
+  if(a){
+    pauseBtn.style.display='';pauseBtn.textContent='⏸ Пауза';
+    stopBtn.style.display='';
+    meta.innerHTML='Идёт отсчёт: '+timerLabel(a);
   }else{
-    btn.textContent='▶ Старт';meta.textContent='Таймер остановлен';box.classList.remove('running');
-    pauseBtn.style.display='none';
-    document.getElementById('timerDisplay').textContent='00:00:00';
-    if(timerInt){clearInterval(timerInt);timerInt=null;}
+    pauseBtn.style.display='none';stopBtn.style.display='none';
+    meta.textContent=state.timers.length?'Все задачи на паузе — нажмите ▶ у нужной':'Таймер остановлен';
   }
+  list.innerHTML=state.timers.length?(
+    '<div class="tlist-hd">Задачи в работе ('+state.timers.length+'). Можно переключаться: время каждой считается отдельно.</div>'+
+    state.timers.map(t=>{
+      const run=!!t.startTs;
+      return `<div class="titem${run?' on':''}" data-tid="${t.id}">
+        <div class="ttime">${fmtClock(Math.floor(tElapsedMs(t)/1000))}</div>
+        <div class="tname">${timerLabel(t)}<small>${run?'идёт сейчас':'на паузе'} · начата ${fmtDateLong(ymd(new Date(t.createdTs)))}</small></div>
+        <div class="tbtns">
+          <button class="btn ${run?'gray':''} sm" onclick="switchTimer('${t.id}')">${run?'⏸ Пауза':'▶ Продолжить'}</button>
+          <button class="btn ghost sm" onclick="stopTimer('${t.id}')">⏹ Записать</button>
+          <button class="btn danger sm" onclick="dropTimer('${t.id}')">✕</button>
+        </div>
+      </div>`;
+    }).join('')
+  ):'';
+  if(a){if(!timerInt)timerInt=setInterval(timerTick,1000);}
+  else if(timerInt){clearInterval(timerInt);timerInt=null;}
+  timerTick();
 }
+/* старт новой задачи из формы (текущая автоматически уходит на паузу) */
 function toggleTimer(){
-  if(state.timer){
-    const t=state.timer;const sec=Math.max(1,Math.round(timerElapsedMs()/1000));
-    const dateForEntry=ymd(new Date(t.createdTs||Date.now()));
-    fsAddEntry({date:dateForEntry,project:t.project,sub:t.sub,task:t.task,sec,minutes:Math.max(1,Math.round(sec/60)),order:Date.now()});
-    state.timer=null;saveTimer();renderTimerState();toast('Записано '+fmtHMS(sec));
-  }else{
-    const st=state.dayStatus[currentDate]||'work';
-    if(st!=='work'){toast('Снимите отметку отсутствия, чтобы запустить таймер');return;}
-    state.timer={createdTs:Date.now(),startTs:Date.now(),accMs:0,project:document.getElementById('fProject').value,
-      sub:document.getElementById('subWrap').classList.contains('hidden')?'':document.getElementById('fSub').value,
-      task:document.getElementById('fTask').value.trim()};
-    saveTimer();renderTimerState();
+  const st=state.dayStatus[currentDate]||'work';
+  if(st!=='work'){toast('Снимите отметку отсутствия, чтобы запустить таймер');return;}
+  const project=document.getElementById('fProject').value;
+  const sub=document.getElementById('subWrap').classList.contains('hidden')?'':document.getElementById('fSub').value;
+  const task=document.getElementById('fTask').value.trim();
+  const same=state.timers.find(t=>t.project===project&&(t.sub||'')===(sub||'')&&(t.task||'')===task);
+  if(same){
+    if(same.startTs){toast('Эта задача уже идёт');return;}
+    resumeTimer(same.id);toast('Вернулись к этой задаче ▶');return;
   }
+  pauseAllTimers();
+  state.timers.push({id:newTimerId(),createdTs:Date.now(),startTs:Date.now(),accMs:0,project,sub,task});
+  saveTimers();renderTimerState();toast('Таймер запущен ▶');
 }
+/* пауза/продолжение активной (кнопка в шапке) */
 function pauseResumeTimer(){
-  const t=state.timer; if(!t)return;
-  if(t.startTs){t.accMs=(t.accMs||0)+(Date.now()-t.startTs);t.startTs=null;}
-  else{t.startTs=Date.now();}
-  saveTimer();renderTimerState();
+  const a=activeTimer();
+  if(a){pauseAllTimers();saveTimers();renderTimerState();return;}
+  const last=lastPausedTimer();
+  if(last)resumeTimer(last.id);
 }
+/* запустить/продолжить задачу: все остальные автоматически на паузу */
+function resumeTimer(id){
+  const t=findTimer(id);if(!t)return;
+  const st=state.dayStatus[currentDate]||'work';
+  if(st!=='work'){toast('Снимите отметку отсутствия, чтобы запустить таймер');return;}
+  pauseAllTimers();
+  t.startTs=Date.now();
+  saveTimers();renderTimerState();
+}
+/* кнопка в строке: идёт → пауза, на паузе → продолжить (и пауза остальным) */
+window.switchTimer=function(id){
+  const t=findTimer(id);if(!t)return;
+  if(t.startTs){pauseAllTimers();saveTimers();renderTimerState();}
+  else resumeTimer(id);
+};
+/* стоп + запись в табель */
+window.stopTimer=function(id){
+  const t=findTimer(id);if(!t)return;
+  const sec=Math.max(1,Math.round(tElapsedMs(t)/1000));
+  const dateForEntry=ymd(new Date(t.createdTs||Date.now()));
+  fsAddEntry({date:dateForEntry,project:t.project,sub:t.sub,task:t.task,sec,minutes:Math.max(1,Math.round(sec/60)),order:Date.now()});
+  state.timers=state.timers.filter(x=>x.id!==id);
+  saveTimers();renderTimerState();toast('Записано '+fmtHMS(sec));
+};
+/* удалить задачу из работы без записи времени */
+window.dropTimer=function(id){
+  const t=findTimer(id);if(!t)return;
+  if(!confirm('Убрать задачу из работы без записи времени ('+fmtHMS(Math.round(tElapsedMs(t)/1000))+')?'))return;
+  state.timers=state.timers.filter(x=>x.id!==id);
+  saveTimers();renderTimerState();toast('Задача убрана (время не записано)');
+};
 
 /* ===== SUMMARY ===== */
 let period='week',perRef=ymd(new Date());
@@ -1636,6 +1731,7 @@ function bind(){
   document.getElementById('fTime').addEventListener('keydown',e=>{if(e.key==='Enter')addEntryFromForm();});
   document.getElementById('timerToggle').addEventListener('click',toggleTimer);
   document.getElementById('timerPause').addEventListener('click',pauseResumeTimer);
+  document.getElementById('timerStop').addEventListener('click',()=>{const a=activeTimer();if(a)stopTimer(a.id);});
   document.getElementById('addLunch').addEventListener('click',addLunch);
   document.getElementById('copyPrev').addEventListener('click',copyPrevDay);
   document.getElementById('rescheduleCancel').addEventListener('click',closeReschedule);
@@ -1724,7 +1820,7 @@ function subscribePersonal(){
   });
 }
 function startApp(){
-  state.timer=loadTimer();
+  state.timers=loadTimers();
   subscribePersonal();
   bind();
   initUI();
