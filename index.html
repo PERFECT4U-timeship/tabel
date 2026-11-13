@@ -1570,8 +1570,29 @@ async function exportAllExcel(){
     const sheetName=name.replace(/[:\\\/\?\*\[\]]/g,'').slice(0,31)||'Лист';
     XLSX.utils.book_append_sheet(wb,ws2,sheetName);
   });
-  XLSX.writeFile(wb,'Свод_'+title.replace(/\s+/g,'_')+'.xlsx');
-  toast('Файл сформирован ✓');
+  downloadExcelWorkbook(wb,'Свод_'+title.replace(/\s+/g,'_')+'.xlsx');
+  toast('Скачивание Excel запрошено');
+}
+
+
+/* Скачивание Excel через Blob и временную ссылку */
+function downloadExcelWorkbook(wb, filename){
+  const bytes = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+  const blob = new Blob(
+    [bytes],
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+  );
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(()=>{
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 60000);
 }
 
 /* ===== EXPORT ===== */
@@ -1607,8 +1628,8 @@ function exportExcel(){
   s3.push([],['ИТОГО',fmtHM(grand),+(grand/60).toFixed(2),100]);
   const ws3=XLSX.utils.aoa_to_sheet(s3);ws3['!cols']=[{wch:36},{wch:12},{wch:12},{wch:10}];
   XLSX.utils.book_append_sheet(wb,ws3,'По проектам');
-  XLSX.writeFile(wb,'Табель_'+(emp!=='—'?emp.replace(/\s+/g,'_')+'_':'')+title.replace(/\s+/g,'_')+'.xlsx');
-  toast('Файл сформирован ✓');
+  downloadExcelWorkbook(wb,'Табель_'+(emp!=='—'?emp.replace(/\s+/g,'_')+'_':'')+title.replace(/\s+/g,'_')+'.xlsx');
+  toast('Скачивание Excel запрошено');
 }
 
 /* ===== BACKUP ===== */
