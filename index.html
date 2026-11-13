@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<script src="xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
 <style>
   :root, [data-theme="dark"]{
     --bg:#0e1016;
@@ -589,19 +589,8 @@
   <section id="tab-settings" class="hidden">
     <div class="card hidden" id="empAdminCard">
       <h2>Сотрудники и доступ</h2>
-      <p class="hint">У каждого сотрудника свой пароль — впишите его в поле рядом с именем и нажмите 💾. Видно только администратору.</p>
+      <p class="hint">Аккаунты и роли управляются в Firebase Console. Здесь отображается только список активных пользователей.</p>
       <div id="empList"></div>
-      <div class="row" style="margin-top:14px">
-        <div class="field grow"><label>Новый сотрудник</label><input type="text" id="newEmpName" placeholder="Имя Фамилия"></div>
-        <div class="field"><label>Пароль</label><input type="text" id="newEmpPass" placeholder="пароль" style="width:130px"></div>
-        <div class="field"><label>Роль</label>
-          <select id="newEmpRole"><option value="employee">Сотрудник</option><option value="manager">Руководитель</option><option value="admin">Администратор</option></select></div>
-        <button class="btn ghost" id="addEmpBtn">＋ Добавить</button>
-      </div>
-      <div class="row" style="margin-top:18px">
-        <div class="field"><label>Пароль по умолчанию (если у сотрудника не задан свой)</label><input type="text" id="sharedPassword" style="width:200px"></div>
-        <button class="btn gray" id="savePasswordBtn">Сохранить</button>
-      </div>
     </div>
     <div class="card">
       <h2>Мой пароль</h2>
@@ -635,7 +624,7 @@
 <div class="overlay show" id="loginOverlay">
   <div class="modal">
     <h3>🕒 Вход в табель</h3>
-    <div class="field"><label>Сотрудник</label><select id="loginEmployee"></select></div>
+    <div class="field"><label>Сотрудник</label><select id="loginEmployee" autocomplete="username" style="width:100%;border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--surface,#fff);color:inherit;font:inherit"><option value="">Выберите сотрудника</option><option value="irina.butylenko@tabel.perfect4u.ru">Бутыленко Ирина</option><option value="irina.kopylova@tabel.perfect4u.ru">Копылова Ирина</option><option value="alexandra.martynyuk@tabel.perfect4u.ru">Мартынюк Александра</option><option value="vera.muntaniol@tabel.perfect4u.ru">Мунтаниол Вера</option><option value="ekaterina.novoselova@tabel.perfect4u.ru">Новоселова Екатерина</option><option value="taina.parfenova@tabel.perfect4u.ru">Парфенова Таина</option><option value="elena.putyatina@tabel.perfect4u.ru">Путятина Елена</option><option value="evgenia.sukhotko@tabel.perfect4u.ru">Сухотько Евгения</option><option value="alexander.shepelin@tabel.perfect4u.ru">Шепелин Александр</option><option value="admin.test@tabel.perfect4u.ru">Администратор</option></select></div>
     <div class="field"><label>Пароль</label><input type="password" id="loginPassword" placeholder="Пароль"></div>
     <div class="login-hint" id="loginError" style="display:none;color:var(--red)"></div>
     <div class="actions"><button class="btn" id="loginBtn" style="width:100%">Войти</button></div>
@@ -699,21 +688,23 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import {getAuth,signInWithEmailAndPassword,onAuthStateChanged,signOut,updatePassword} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, addDoc, onSnapshot, collectionGroup, query, where
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 const firebaseConfig={
-  apiKey:"AIzaSyADWuktW7c2BlPvq0rg1-UGsjX2dC53FoI",
-  authDomain:"uviz-tabel.firebaseapp.com",
-  projectId:"uviz-tabel",
-  storageBucket:"uviz-tabel.firebasestorage.app",
-  messagingSenderId:"408428975185",
-  appId:"1:408428975185:web:be8cfaaf4b3564f8a0d470"
+  apiKey:"AIzaSyAhMyupdAfKMvBU6l88pc93yQBozgquLWs",
+  authDomain:"perfect4u-tabel-test.firebaseapp.com",
+  projectId:"perfect4u-tabel-test",
+  storageBucket:"perfect4u-tabel-test.firebasestorage.app",
+  messagingSenderId:"1085007085022",
+  appId:"1:1085007085022:web:2d26a79ff4fcb5563fb14f"
 };
 const fbApp=initializeApp(firebaseConfig);
 const db=getFirestore(fbApp);
+const auth=getAuth(fbApp);
 
 const MONTHS=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 const MONTHS_NOM=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
@@ -796,7 +787,7 @@ function projColor(name){const p=cfg.projects.find(x=>x.name===name);return p?p.
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 
 /* ===== FIRESTORE CRUD ===== */
-function empBase(){return doc(db,'timesheets',session.employee);}
+function empBase(){return doc(db,'timesheets',session.uid);}
 async function fsAddEntry(e){await addDoc(collection(empBase(),'entries'),{...e,employee:session.employee});}
 async function fsUpdateEntry(id,patch){await updateDoc(doc(empBase(),'entries',id),patch);}
 async function fsDeleteEntry(id){await deleteDoc(doc(empBase(),'entries',id));}
@@ -1363,58 +1354,36 @@ function renderProjEditor(){
 
 /* ===== СМЕНА СВОЕГО ПАРОЛЯ (все роли) ===== */
 async function saveMyPassword(){
-  const v=document.getElementById('myNewPass').value.trim();
-  if(!v){toast('Введите новый пароль');return;}
-  const next=cfg.employees.map(e=>e.name===session.employee?{...e,password:v}:e);
-  await updateDoc(doc(db,'config','app'),{employees:next});
-  document.getElementById('myNewPass').value='';
-  toast('Пароль изменён ✓');
+  const el=document.getElementById('myNewPass');
+  const v=el.value;
+  if(v.length<12){toast('Пароль: минимум 12 символов');return;}
+  try{await updatePassword(auth.currentUser,v);el.value='';toast('Пароль изменён ✓');}
+  catch(e){toast('Для смены пароля нужно повторно войти');console.error(e);}
 }
 
 /* ===== EMPLOYEES ADMIN ===== */
 function renderEmpAdmin(){
   const box=document.getElementById('empList');
-  box.innerHTML=cfg.employees.map((e,i)=>`
-    <div class="emp-row">
-      <span class="ename">${esc(e.name)}</span>
-      <input type="text" class="emp-pass" data-pi="${i}" value="${esc(e.password||'')}" placeholder="пароль">
-      <button class="btn gray sm emp-pass-save" data-pi="${i}" title="Сохранить пароль">💾</button>
-      <select data-ri="${i}" class="emp-role">
-        <option value="employee" ${e.role==='employee'?'selected':''}>Сотрудник</option>
-        <option value="manager" ${e.role==='manager'?'selected':''}>Руководитель</option>
-        <option value="admin" ${e.role==='admin'?'selected':''}>Администратор</option>
-      </select>
-      <button class="iconbtn" title="Удалить" data-remove="${i}">🗑️</button>
-    </div>`).join('');
-  box.querySelectorAll('.emp-role').forEach(sel=>sel.addEventListener('change',async e=>{
-    const i=+e.target.dataset.ri;const next=cfg.employees.map((x,idx)=>idx===i?{...x,role:e.target.value}:x);
-    await updateDoc(doc(db,'config','app'),{employees:next});toast('Роль обновлена');
-  }));
-  box.querySelectorAll('.emp-pass-save').forEach(b=>b.addEventListener('click',async e=>{
-    const i=+e.currentTarget.dataset.pi;
-    const val=box.querySelector('.emp-pass[data-pi="'+i+'"]').value.trim();
-    const next=cfg.employees.map((x,idx)=>idx===i?{...x,password:val}:x);
-    await updateDoc(doc(db,'config','app'),{employees:next});toast('Пароль сохранён: '+cfg.employees[i].name);
-  }));
-  box.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async e=>{
-    const i=+e.currentTarget.dataset.remove;
-    if(!confirm('Удалить сотрудника «'+cfg.employees[i].name+'» из списка? Его записи в базе останутся.'))return;
-    const next=cfg.employees.filter((_,idx)=>idx!==i);
-    await updateDoc(doc(db,'config','app'),{employees:next});toast('Удалено');
-  }));
-  document.getElementById('sharedPassword').value=cfg.password||'';
+  box.innerHTML=cfg.employees.map(e=>`<div class="emp-row"><span class="ename">${esc(e.name)}</span><span class="muted">${esc(e.role)}</span></div>`).join('')+
+    '<p class="hint">В тестовой версии управление аккаунтами и ролями производится только через Firebase Console. Пароли в Firestore не хранятся.</p>';
 }
 
 /* ===== ALL EMPLOYEES REPORT (manager/admin only) ===== */
 let allPeriod='week',allPerRef=ymd(new Date());
 let allReportEntries=[],allReportStatuses=[];
 async function fetchAllEntries(start,end){
-  const q=query(collectionGroup(db,'entries'),where('date','>=',start),where('date','<=',end));
-  const snap=await getDocs(q);return snap.docs.map(d=>d.data());
+  if(session.role!=='admin')throw Error('Только администратор');
+  const rows=await Promise.all(cfg.employees.filter(e=>e.uid).map(async e=>{
+    const snap=await getDocs(query(collection(db,'timesheets',e.uid,'entries'),where('date','>=',start),where('date','<=',end)));
+    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end);
+  }));return rows.flat();
 }
 async function fetchAllDayStatus(start,end){
-  const q=query(collectionGroup(db,'dayStatus'),where('date','>=',start),where('date','<=',end));
-  const snap=await getDocs(q);return snap.docs.map(d=>d.data());
+  if(session.role!=='admin')throw Error('Только администратор');
+  const rows=await Promise.all(cfg.employees.filter(e=>e.uid).map(async e=>{
+    const snap=await getDocs(query(collection(db,'timesheets',e.uid,'dayStatus'),where('date','>=',start),where('date','<=',end)));
+    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end);
+  }));return rows.flat();
 }
 function blankEmp(){return{minutes:0,lunch:0,vac:0,off:0,sick:0};}
 function summarizeByEmployee(entries,statuses){
@@ -1651,6 +1620,7 @@ function backupSave(){
   a.click();URL.revokeObjectURL(a.href);toast('Копия сохранена');
 }
 function backupLoad(file){
+  toast("Импорт отключён в тестовой версии"); return;
   const r=new FileReader();
   r.onload=async()=>{
     try{
@@ -1678,10 +1648,10 @@ function switchTab(name){
 function applyTheme(){document.documentElement.setAttribute('data-theme',state.theme);document.getElementById('themeToggle').textContent=state.theme==='dark'?'🌙':'☀️';}
 
 function applyRoleUI(){
-  const isManager=session.role==='manager'||session.role==='admin';
+  const isManager=session.role==='admin';
   document.getElementById('navAll').classList.toggle('hidden',!isManager);
   document.getElementById('empAdminCard').classList.toggle('hidden',session.role!=='admin');
-  document.getElementById('normHours').disabled=session.role==='employee';
+  document.getElementById('normHours').disabled=session.role!=='admin';
 }
 
 function initUI(){
@@ -1698,7 +1668,7 @@ function bind(){
   document.getElementById('themeToggle').addEventListener('click',()=>{state.theme=state.theme==='dark'?'light':'dark';saveTheme();applyTheme();});
   document.getElementById('logoutBtn').addEventListener('click',doLogout);
   document.getElementById('normHours').addEventListener('change',async e=>{
-    if(session.role==='employee'){e.target.value=cfg.normHours;return;}
+    if(session.role!=='admin'){e.target.value=cfg.normHours;return;}
     const v=parseFloat(e.target.value)||8;
     await updateDoc(doc(db,'config','app'),{normHours:v});
   });
@@ -1706,20 +1676,6 @@ function bind(){
   document.getElementById('allPerPrev').addEventListener('click',()=>shiftAllPeriod(-1));
   document.getElementById('allPerNext').addEventListener('click',()=>shiftAllPeriod(1));
   document.getElementById('allExportBtn').addEventListener('click',exportAllExcel);
-  document.getElementById('addEmpBtn').addEventListener('click',async()=>{
-    const name=document.getElementById('newEmpName').value.trim();
-    if(!name){toast('Введите имя');return;}
-    if(cfg.employees.some(e=>e.name===name)){toast('Такой сотрудник уже есть');return;}
-    const role=document.getElementById('newEmpRole').value;
-    const password=document.getElementById('newEmpPass').value.trim();
-    await updateDoc(doc(db,'config','app'),{employees:[...cfg.employees,{name,role,password}]});
-    document.getElementById('newEmpName').value='';document.getElementById('newEmpPass').value='';toast('Сотрудник добавлен ✓');
-  });
-  document.getElementById('savePasswordBtn').addEventListener('click',async()=>{
-    const p=document.getElementById('sharedPassword').value.trim();
-    if(!p){toast('Пароль не может быть пустым');return;}
-    await updateDoc(doc(db,'config','app'),{password:p});toast('Пароль обновлён ✓');
-  });
   // calendar nav
   document.getElementById('calPrev').addEventListener('click',()=>{const d=parseYmd(calMonthRef);calMonthRef=ymd(new Date(d.getFullYear(),d.getMonth()-1,15));renderCalendar();});
   document.getElementById('calNext').addEventListener('click',()=>{const d=parseYmd(calMonthRef);calMonthRef=ymd(new Date(d.getFullYear(),d.getMonth()+1,15));renderCalendar();});
@@ -1761,10 +1717,13 @@ function bind(){
   document.getElementById('expType').addEventListener('change',e=>{const m=e.target.value==='month';document.getElementById('expMonthWrap').classList.toggle('hidden',!m);document.getElementById('expYearWrap').classList.toggle('hidden',m);});
   document.getElementById('doExport').addEventListener('click',exportExcel);
   document.getElementById('backupSave').addEventListener('click',backupSave);
+  document.getElementById('backupLoadBtn').disabled=true;
+  document.getElementById('resetAll').disabled=true;
   document.getElementById('backupLoadBtn').addEventListener('click',()=>document.getElementById('backupLoad').click());
   document.getElementById('backupLoad').addEventListener('change',e=>{if(e.target.files[0])backupLoad(e.target.files[0]);});
-  document.getElementById('addProject').addEventListener('click',()=>{if(session.role==='employee')return;cfg.projects.push({name:'Новый проект',subs:[],color:PALETTE[cfg.projects.length%PALETTE.length]});persistProjects();renderProjEditor();refreshProjectSelect();});
+  document.getElementById('addProject').addEventListener('click',()=>{if(session.role!=='admin')return;cfg.projects.push({name:'Новый проект',subs:[],color:PALETTE[cfg.projects.length%PALETTE.length]});persistProjects();renderProjEditor();refreshProjectSelect();});
   document.getElementById('resetAll').addEventListener('click',async()=>{
+    toast('Сброс отключён в тестовой версии');return;
     if(!confirm('Удалить ВСЕ ваши записи и планы (только ваши, у других сотрудников данные не изменятся)? Действие необратимо.'))return;
     await Promise.all([
       ...state.entries.map(e=>fsDeleteEntry(e.id)),
@@ -1776,114 +1735,71 @@ function bind(){
   const now=new Date();document.getElementById('expMonth').value=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');document.getElementById('expYear').value=now.getFullYear();
 }
 
-/* ===== LOGIN / BOOT ===== */
-function populateLoginEmployees(){
-  const sel=document.getElementById('loginEmployee');
-  const prev=sel.value;
-  sel.innerHTML=cfg.employees.map(e=>`<option value="${esc(e.name)}">${esc(e.name)}</option>`).join('');
-  if(prev)sel.value=prev;
-}
-function tryLogin(){
-  const name=document.getElementById('loginEmployee').value;
+/* ===== SECURE AUTH / BOOT ===== */
+function populateLoginEmployees(){} // Email вводится вручную, без публичного списка сотрудников.
+let started=false,unsubEntries=null,unsubPlans=null,unsubDayStatus=null,unsubCfg=null;
+async function tryLogin(){
+  const email=document.getElementById('loginEmployee').value.trim();
   const pass=document.getElementById('loginPassword').value;
-  const errEl=document.getElementById('loginError');
-  if(!cfg.employees.length){errEl.textContent='Список сотрудников пуст — обратитесь к администратору';errEl.style.display='block';return;}
-  const emp=cfg.employees.find(e=>e.name===name);
-  if(!emp){errEl.textContent='Сотрудник не найден';errEl.style.display='block';return;}
-  const expected=(emp.password!=null&&emp.password!=='')?emp.password:cfg.password;
-  if(pass!==expected){errEl.textContent='Неверный пароль';errEl.style.display='block';return;}
-  errEl.style.display='none';
-  session={employee:emp.name,role:emp.role};
-  saveSession(session);
-  document.getElementById('loginOverlay').classList.remove('show');
-  startApp();
+  const err=document.getElementById('loginError');
+  err.style.display='none';
+  try{await signInWithEmailAndPassword(auth,email,pass);document.getElementById('loginPassword').value='';}
+  catch(e){err.textContent='Не удалось войти. Проверьте выбранного сотрудника и пароль.';err.style.display='block';console.error(e);}
 }
-function doLogout(){clearSession();location.reload();}
-
-let unsubEntries=null,unsubPlans=null,unsubDayStatus=null;
+async function doLogout(){await signOut(auth);location.reload();}
 function subscribePersonal(){
-  const base=doc(db,'timesheets',session.employee);
+  const base=doc(db,'timesheets',session.uid);
+  const reportError=e=>{console.error('Firestore:',e);toast('Ошибка доступа к данным');};
   unsubEntries=onSnapshot(collection(base,'entries'),snap=>{
-    state.entries=snap.docs.map(d=>({id:d.id,...d.data()}));
-    renderTrack();refreshHints();
+    state.entries=snap.docs.map(d=>({id:d.id,...d.data()}));renderTrack();refreshHints();
     if(!document.getElementById('tab-summary').classList.contains('hidden'))renderSummary();
-  });
+  },reportError);
   unsubPlans=onSnapshot(collection(base,'plans'),snap=>{
-    state.plans=snap.docs.map(d=>({id:d.id,...d.data()}));
-    renderTrack();
+    state.plans=snap.docs.map(d=>({id:d.id,...d.data()}));renderTrack();
     if(!document.getElementById('tab-plan').classList.contains('hidden'))renderPlanTab();
-  });
+  },reportError);
   unsubDayStatus=onSnapshot(collection(base,'dayStatus'),snap=>{
-    state.dayStatus={};snap.docs.forEach(d=>{state.dayStatus[d.id]=d.data().status;});
-    renderTrack();
-    if(!document.getElementById('tab-summary').classList.contains('hidden'))renderSummary();
-  });
+    state.dayStatus={};snap.docs.forEach(d=>state.dayStatus[d.id]=d.data().status);
+    renderTrack();if(!document.getElementById('tab-summary').classList.contains('hidden'))renderSummary();
+  },reportError);
 }
 function startApp(){
-  state.timers=loadTimers();
-  subscribePersonal();
-  bind();
-  initUI();
-  runMigrations();
+  if(started)return;started=true;
+  state.timers=loadTimers();subscribePersonal();bind();initUI();
 }
-/* Одноразовые правки общей конфигурации (выполняет руководитель/админ при входе) */
-async function runMigrations(){
-  try{
-    if(!session||session.role==='employee'||!Array.isArray(cfg.projects))return;
-    if(!cfg.blogeryAdded){
-      const perfekt=cfg.projects.find(p=>p.name==='ПЕРФЕКТ');
-      const projects=cfg.projects.map(p=>p.name==='ПЕРФЕКТ'&&!(p.subs||[]).includes('БЛОГЕРЫ')?{...p,subs:[...(p.subs||[]),'БЛОГЕРЫ']}:p);
-      await updateDoc(doc(db,'config','app'),{projects,blogeryAdded:true});
-    }
-  }catch(e){console.error('migration',e);}
-}
+async function runMigrations(){} // Автоматические изменения конфигурации отключены.
 function watchConfig(){
-  onSnapshot(doc(db,'config','app'),snap=>{
-    if(!snap.exists())return;
-    cfg=snap.data();
-    cfg.employees=cfg.employees||[];
-    cfg.projects=(cfg.projects||[]).map((p,i)=>({...p,color:p.color||PALETTE[i%PALETTE.length],subs:p.subs||[]}));
-    if(!session){populateLoginEmployees();return;}
-    const emp=cfg.employees.find(e=>e.name===session.employee);
-    if(!emp){doLogout();return;}
-    if(emp.role!==session.role){session.role=emp.role;saveSession(session);document.getElementById('whoRole').textContent=ROLE_LABELS[session.role];}
-    applyRoleUI();
-    refreshProjectSelect();refreshPlanSelect();renderTrack();
-    document.getElementById('normHours').value=cfg.normHours;
-    if(!document.getElementById('tab-settings').classList.contains('hidden')){renderProjEditor();if(session.role==='admin')renderEmpAdmin();}
-    if(!document.getElementById('tab-summary').classList.contains('hidden'))renderSummary();
-  });
-}
-async function ensureConfig(){
-  const ref=doc(db,'config','app');
-  const snap=await getDoc(ref);
-  if(!snap.exists()){
-    await setDoc(ref,{employees:[{name:'Администратор',role:'admin',password:'1234'}],projects:DEFAULT_PROJECTS,normHours:8,password:'1234'});
-  }
+  if(unsubCfg)unsubCfg();
+  unsubCfg=onSnapshot(doc(db,'config','app'),snap=>{
+    const data=snap.exists()?snap.data():{};
+    cfg.projects=(data.projects||DEFAULT_PROJECTS).map((p,i)=>({...p,color:p.color||PALETTE[i%PALETTE.length],subs:p.subs||[]}));
+    cfg.normHours=data.normHours||8;
+    if(!session)return;
+    if(started){applyRoleUI();refreshProjectSelect();refreshPlanSelect();renderTrack();
+      document.getElementById('normHours').value=cfg.normHours;}
+  },e=>console.error('Config:',e));
 }
 async function boot(){
-  try{
-    await ensureConfig();
-    const cfgSnap=await getDoc(doc(db,'config','app'));
-    cfg=cfgSnap.data();
-    cfg.employees=cfg.employees||[];
-    cfg.projects=(cfg.projects||[]).map((p,i)=>({...p,color:p.color||PALETTE[i%PALETTE.length],subs:p.subs||[]}));
-  }catch(e){
-    console.error(e);
-    document.getElementById('loginError').textContent='Не удалось подключиться к базе. Проверьте интернет.';
-    document.getElementById('loginError').style.display='block';
-    return;
-  }
-  watchConfig();
-  populateLoginEmployees();
   document.getElementById('loginBtn').addEventListener('click',tryLogin);
   document.getElementById('loginPassword').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin();});
-  const existing=loadSession();
-  if(existing&&cfg.employees.some(e=>e.name===existing.employee)){
-    session=existing;
-    document.getElementById('loginOverlay').classList.remove('show');
-    startApp();
-  }
+  onAuthStateChanged(auth,async user=>{
+    if(!user){session=null;document.getElementById('loginOverlay').classList.add('show');return;}
+    try{
+      const profile=await getDoc(doc(db,'users',user.uid));
+      if(!profile.exists()||profile.data().active!==true)throw Error('Профиль не активен');
+      const p=profile.data();
+      session={uid:user.uid,employee:p.employee,role:p.role};
+      cfg.employees=[];
+      if(p.role==='admin'){
+        const all=await getDocs(collection(db,'users'));
+        cfg.employees=all.docs.filter(d=>d.data().role==='employee' && d.data().active===true && d.data().includeInHistory===true).map(d=>({uid:d.id,name:d.data().employee,role:d.data().role}));
+      }else cfg.employees=[{uid:user.uid,name:p.employee,role:p.role}];
+      if(p.role==='admin'){const configRef=doc(db,'config','app');const existing=await getDoc(configRef);if(!existing.exists())await setDoc(configRef,{projects:DEFAULT_PROJECTS,normHours:8});}
+      watchConfig();
+      document.getElementById('loginOverlay').classList.remove('show');
+      startApp();
+    }catch(e){console.error(e);await signOut(auth);const err=document.getElementById('loginError');err.textContent='Не удалось загрузить профиль. Проверьте настройки доступа.';err.style.display='block';}
+  });
 }
 boot();
 </script>
