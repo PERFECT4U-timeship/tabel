@@ -596,8 +596,10 @@
       <h2>Мой пароль</h2>
       <p class="hint">Смените свой пароль для входа. Он понадобится при следующем входе — запомните его.</p>
       <div class="row">
-        <div class="field"><label>Новый пароль</label><input type="text" id="myNewPass" style="width:200px"></div>
-        <button class="btn" id="saveMyPass">Сменить пароль</button>
+        <div class="field"><label>Текущий пароль</label><input type="password" id="myCurrentPass" autocomplete="current-password" style="width:200px"></div>
+         <div class="field"><label>Новый пароль</label><input type="password" id="myNewPass" autocomplete="new-password" style="width:200px"></div>
+         <div class="field"><label>Повторите новый пароль</label><input type="password" id="myConfirmPass" autocomplete="new-password" style="width:200px"></div>
+         <button class="btn" id="saveMyPass">Сменить пароль</button>
       </div>
     </div>
     <div class="card">
@@ -688,7 +690,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import {getAuth,signInWithEmailAndPassword,onAuthStateChanged,signOut,updatePassword} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {getAuth,signInWithEmailAndPassword,onAuthStateChanged,signOut,updatePassword,reauthenticateWithCredential,EmailAuthProvider} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, addDoc, onSnapshot, collectionGroup, query, where
@@ -1354,11 +1356,37 @@ function renderProjEditor(){
 
 /* ===== СМЕНА СВОЕГО ПАРОЛЯ (все роли) ===== */
 async function saveMyPassword(){
-  const el=document.getElementById('myNewPass');
-  const v=el.value;
-  if(v.length<12){toast('Пароль: минимум 12 символов');return;}
-  try{await updatePassword(auth.currentUser,v);el.value='';toast('Пароль изменён ✓');}
-  catch(e){toast('Для смены пароля нужно повторно войти');console.error(e);}
+  const currentEl=document.getElementById('myCurrentPass');
+  const nextEl=document.getElementById('myNewPass');
+  const confirmEl=document.getElementById('myConfirmPass');
+  const btn=document.getElementById('saveMyPass');
+  const user=auth.currentUser;
+
+  if(!user || !user.email){toast('Сначала войдите в табель');return;}
+  if(!currentEl.value){toast('Введите текущий пароль');return;}
+  if(nextEl.value.length<12){toast('Новый пароль: минимум 12 символов');return;}
+  if(nextEl.value!==confirmEl.value){toast('Новые пароли не совпадают');return;}
+  if(nextEl.value===currentEl.value){toast('Придумайте другой пароль');return;}
+
+  btn.disabled=true;
+  try{
+    const credential=EmailAuthProvider.credential(user.email,currentEl.value);
+    await reauthenticateWithCredential(user,credential);
+    await updatePassword(user,nextEl.value);
+    currentEl.value='';
+    nextEl.value='';
+    confirmEl.value='';
+    toast('Пароль успешно изменён ✓');
+  }catch(e){
+    console.error('Password change:',e.code);
+    if(['auth/wrong-password','auth/invalid-credential'].includes(e.code)){
+      toast('Неверный текущий пароль');
+    }else{
+      toast('Не удалось изменить пароль. Попробуйте снова');
+    }
+  }finally{
+    btn.disabled=false;
+  }
 }
 
 /* ===== EMPLOYEES ADMIN ===== */
