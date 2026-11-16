@@ -1389,10 +1389,20 @@ async function saveMyPassword(){
   }
 }
 
+/* Архив сотрудников: дата прекращения работы */
+const ARCHIVED_EMPLOYEES = {
+  'Бутыленко Ирина': '2026-11-01'
+};
+
+function includeEmployeeInReport(e, start){
+  const archivedFrom = ARCHIVED_EMPLOYEES[e.name];
+  return !archivedFrom || start < archivedFrom;
+}
+
 /* ===== EMPLOYEES ADMIN ===== */
 function renderEmpAdmin(){
   const box=document.getElementById('empList');
-  box.innerHTML=cfg.employees.map(e=>`<div class="emp-row"><span class="ename">${esc(e.name)}</span><span class="muted">${esc(e.role)}</span></div>`).join('')+
+  box.innerHTML=cfg.employees.map(e=>`<div class="emp-row"><span class="ename">${esc(e.name)}</span><span class="muted">${esc(e.role)}${ARCHIVED_EMPLOYEES[e.name]?" · Архив":""}</span></div>`).join('')+
     '<p class="hint">В тестовой версии управление аккаунтами и ролями производится только через Firebase Console. Пароли в Firestore не хранятся.</p>';
 }
 
@@ -1401,22 +1411,22 @@ let allPeriod='week',allPerRef=ymd(new Date());
 let allReportEntries=[],allReportStatuses=[];
 async function fetchAllEntries(start,end){
   if(session.role!=='admin')throw Error('Только администратор');
-  const rows=await Promise.all(cfg.employees.filter(e=>e.uid).map(async e=>{
+  const rows=await Promise.all(cfg.employees.filter(e=>e.uid && includeEmployeeInReport(e,start)).map(async e=>{
     const snap=await getDocs(query(collection(db,'timesheets',e.uid,'entries'),where('date','>=',start),where('date','<=',end)));
-    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end);
+    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end&&includeEmployeeInReport(e,d.date));
   }));return rows.flat();
 }
 async function fetchAllDayStatus(start,end){
   if(session.role!=='admin')throw Error('Только администратор');
-  const rows=await Promise.all(cfg.employees.filter(e=>e.uid).map(async e=>{
+  const rows=await Promise.all(cfg.employees.filter(e=>e.uid && includeEmployeeInReport(e,start)).map(async e=>{
     const snap=await getDocs(query(collection(db,'timesheets',e.uid,'dayStatus'),where('date','>=',start),where('date','<=',end)));
-    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end);
+    return snap.docs.map(d=>({...d.data(),employee:e.name})).filter(d=>d.date>=start&&d.date<=end&&includeEmployeeInReport(e,d.date));
   }));return rows.flat();
 }
 function blankEmp(){return{minutes:0,lunch:0,vac:0,off:0,sick:0};}
-function summarizeByEmployee(entries,statuses){
+function summarizeByEmployee(entries,statuses,start){
   const byEmp={};
-  cfg.employees.forEach(e=>{byEmp[e.name]=blankEmp();});
+  cfg.employees.filter(e=>includeEmployeeInReport(e,start)).forEach(e=>{byEmp[e.name]=blankEmp();});
   entries.forEach(e=>{const b=byEmp[e.employee]=byEmp[e.employee]||blankEmp();if(e.lunch)b.lunch+=e.minutes;else b.minutes+=e.minutes;});
   statuses.forEach(s=>{
     const b=byEmp[s.employee]=byEmp[s.employee]||blankEmp();
@@ -1540,7 +1550,7 @@ async function renderAllReport(){
   }
   allReportEntries=entries;allReportStatuses=statuses;
   renderAllProjBreakdown(entries);
-  const byEmp=summarizeByEmployee(entries,statuses);
+  const byEmp=summarizeByEmployee(entries,statuses,start);
   const rows=Object.keys(byEmp).sort((a,b)=>a.localeCompare(b,'ru'));
   if(!rows.length){area.innerHTML='<div class="empty">Нет данных за этот период</div>';return;}
   let html='<table><thead><tr><th>Сотрудник</th><th>Отработано</th><th>Обед</th><th>Отпуск</th><th>Отгул</th><th>Больничный</th></tr></thead><tbody>';
@@ -1567,7 +1577,7 @@ async function exportAllExcel(){
   try{[entries,statuses]=await Promise.all([fetchAllEntries(start,end),fetchAllDayStatus(start,end)]);}
   catch(e){console.error(e);toast('Ошибка загрузки данных');return;}
   const wb=XLSX.utils.book_new();
-  const byEmp=summarizeByEmployee(entries,statuses);
+  const byEmp=summarizeByEmployee(entries,statuses,start);
   const s1=[['СВОДНЫЙ ОТЧЁТ ПО КОМПАНИИ'],['Период:',title],[],['Сотрудник','Часы (ч:мм)','Часы (десят.)','Обед (ч:мм)','Отпуск (дн)','Отгул (дн)','Больничный (дн)']];
   Object.keys(byEmp).sort((a,b)=>a.localeCompare(b,'ru')).forEach(name=>{const b=byEmp[name];
     s1.push([name,fmtHM(b.minutes),+(b.minutes/60).toFixed(2),b.lunch?fmtHM(b.lunch):'',b.vac,b.off,b.sick]);});
